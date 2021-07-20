@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
 gg.set_backend("th")
 
 
@@ -16,7 +17,21 @@ def forward(A, X, target, w1, w2):
     return out.view(1, -1)
 
 
-def defense(graph, budget, eps, target, w1, w2):
+def defense(graph, budget, eps, target):
+    """
+    Defender Model
+    @param graph: clean graph or attacked graph
+    @param budget: maximum number of modification
+    @param eps: calibration constant
+    @param target: target node
+    @return: graph after defensive perturbation
+    """
+    trainer = gg.gallery.nodeclas.GCN(device='cpu', seed=100).make_data(graph).build()
+    trainer.fit(splits.train_nodes, splits.val_nodes)
+    w1, w2 = trainer.model.parameters()
+    w1 = w1.t()
+    w2 = w2.t()
+
     A = gf.astensor(graph.A)
     X = gf.astensor(graph.x)
     A = nn.Parameter(A.to_dense())
@@ -66,32 +81,20 @@ data = gg.datasets.NPZDataset('cora', root='~/GraphData/datasets', transform='st
 graph = data.graph
 splits = data.split_nodes(random_state=15)
 
-
 """
 Attacker Model
 """
 # GCN for attacker
-trainer = gg.gallery.nodeclas.GCN(device='cpu', seed=42).make_data(graph).build()
-trainer.fit(splits.train_nodes, splits.val_nodes)
-w1, w2 = trainer.model.parameters()
-w1 = w1.t()
-w2 = w2.t()
+trainer_a = gg.gallery.nodeclas.GCN(device='cpu', seed=42).make_data(graph).build()
+trainer_a.fit(splits.train_nodes, splits.val_nodes)
+w1_a, w2_a = trainer_a.model.parameters()
+w1_a = w1_a.t()
+w2_a = w2_a.t()
 # attacker model
-W = w1 @ w2
-W = gf.tensoras(W)
-attacker = gg.attack.targeted.Nettack(graph).process(W)
+W_a = w1_a @ w2_a
+W_a = gf.tensoras(W_a)
+attacker = gg.attack.targeted.Nettack(graph).process(W_a)
 # attacker = gg.attack.targeted.FGSM(graph).process(trainer)
-
-
-"""
-Defender Model
-"""
-# GCN for defender
-trainer = gg.gallery.nodeclas.GCN(device='cpu', seed=100).make_data(graph).build()
-trainer.fit(splits.train_nodes, splits.val_nodes)
-w1, w2 = trainer.model.parameters()
-w1 = w1.t()
-w2 = w2.t()
 
 
 """
@@ -99,46 +102,73 @@ Generate attacked_g, clean_defended_g, attacked_defended_g
 """
 # set target, budget, eps
 # target = np.random.choice(splits.test_nodes, 1)[0]
-target = 1000
-budget = 1
-eps = 0.5
+# target = 1000
 
-# attacked_g
-attacker.set_max_perturbations()
-attacker.reset()
-attacker.attack(target,
-                direct_attack=True,
-                structure_attack=True,
-                feature_attack=False)
-attack_g = attacker.g
-print(f'{attacker.num_budgets} edges has been modified.')
+# target-loop, write the result out to the file
+with open("changeof_clean_attacked.txt", "w") as f:
+    # clean_change = []
+    # attacked_change = []
+    for target in splits.test_nodes:
+        budget = 1
+        eps = 1
+        # true label
+        target_label = graph.node_label[target]
 
-# clean_defended_g
-clean_defended_g = defense(graph, budget, eps, target, w1, w2)
+        # attacked_g
+        attacker.set_max_perturbations()
+        attacker.reset()
+        attacker.attack(target,
+                        direct_attack=True,
+                        structure_attack=True,
+                        feature_attack=False)
+        attack_g = attacker.g
+        print(f'{attacker.num_budgets} edges has been modified.')
 
-# attacked_defended_g
-attacked_defended_g = defense(attack_g, budget, eps, target, w1, w2)
+        # clean_defended_g
+        clean_defended_g = defense(graph, budget, eps, target)
 
+        # attacked_defended_g
+        attacked_defended_g = defense(attack_g, budget, eps, target)
 
-"""
-Prediction
-"""
-# clean graph
-trainer = gg.gallery.nodeclas.GCN(seed=1234567).make_data(graph).build()
-his = trainer.fit(splits.train_nodes,
-                  splits.val_nodes,
-                  verbose=0,
-                  epochs=100)
-clean_predict = trainer.predict(target, transform="softmax")
+        """
+        Prediction
+        """
+        # clean graph
+        trainer = gg.gallery.nodeclas.GCN(seed=1234567).make_data(graph).build()
+        his = trainer.fit(splits.train_nodes,
+                          splits.val_nodes,
+                          verbose=0,
+                          epochs=100)
+        clean_predict = trainer.predict(target, transform="softmax")
+        clean_label = np.argmax(clean_predict)
 
-# attacked graph
-trainer = gg.gallery.nodeclas.GCN(seed=1234567).make_data(attack_g).build()
-his = trainer.fit(splits.train_nodes,
-                  splits.val_nodes,
-                  verbose=0,
-                  epochs=100)
-attacked_predict = trainer.predict(target, transform="softmax")
+        # attacked graph
+        trainer = gg.gallery.nodeclas.GCN(seed=1234567).make_data(attack_g).build()
+        his = trainer.fit(splits.train_nodes,
+                          splits.val_nodes,
+                          verbose=0,
+                          epochs=100)
+        attacked_predict = trainer.predict(target, transform="softmax")
+        attacked_label = np.argmax(attacked_predict)
 
-# clean defended graph
+        # clean defended graph
+        trainer = gg.gallery.nodeclas.GCN(seed=1234567).make_data(clean_defended_g).build()
+        his = trainer.fit(splits.train_nodes,
+                          splits.val_nodes,
+                          verbose=0,
+                          epochs=100)
+        clean_defended_predict = trainer.predict(target, transform="softmax")
+        clean_defended_label = np.argmax(clean_defended_predict)
 
-# attacked defended graph
+        # attacked defended graph
+        trainer = gg.gallery.nodeclas.GCN(seed=1234567).make_data(attacked_defended_g).build()
+        his = trainer.fit(splits.train_nodes,
+                          splits.val_nodes,
+                          verbose=0,
+                          epochs=100)
+        attacked_defended_predict = trainer.predict(target, transform="softmax")
+        attacked_defended_label = np.argmax(attacked_defended_predict)
+
+        # clean_change.append(clean_predict[clean_label]-clean_defended_predict[clean_defended_label])
+        # attacked_change.append(attacked_predict[attacked_label]-attacked_defended_predict[attacked_defended_label])
+        f.write(f"{clean_predict[clean_label]-clean_defended_predict[clean_defended_label],attacked_predict[attacked_label]-attacked_defended_predict[attacked_defended_label]}")

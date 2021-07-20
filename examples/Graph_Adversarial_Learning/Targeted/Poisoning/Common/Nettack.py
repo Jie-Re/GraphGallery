@@ -51,6 +51,10 @@ his = trainer.fit(splits.train_nodes,
                   epochs=100)
 perturbed_predict = trainer.predict(target, transform="softmax")
 
+################## Debug ##################################
+print("clean graph:", graph)
+print("attaced graph:", attacker.g)
+
 ################### Results ############################
 print("original prediction", original_predict)
 print("perturbed prediction", perturbed_predict)
