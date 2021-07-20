@@ -171,4 +171,4 @@ with open("changeof_clean_attacked.txt", "w") as f:
 
         # clean_change.append(clean_predict[clean_label]-clean_defended_predict[clean_defended_label])
         # attacked_change.append(attacked_predict[attacked_label]-attacked_defended_predict[attacked_defended_label])
-        f.write(f"{clean_predict[clean_label]-clean_defended_predict[clean_defended_label],attacked_predict[attacked_label]-attacked_defended_predict[attacked_defended_label]}")
+        f.write(f"{clean_predict[clean_label]-clean_defended_predict[clean_defended_label],attacked_predict[attacked_label]-attacked_defended_predict[attacked_defended_label]}\n")
